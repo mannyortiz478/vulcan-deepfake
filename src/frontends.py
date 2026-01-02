@@ -13,9 +13,11 @@ MFCC_FN = torchaudio.transforms.MFCC(
     sample_rate=SAMPLING_RATE,
     n_mfcc=128,
     melkwargs={
-        "n_fft": 512,
+        "n_fft": 1024,
         "win_length": win_length,
         "hop_length": hop_length,
+        "n_mels": 128,
+        "f_max": 8000.0,
     },
 ).to(device)
 
@@ -24,7 +26,7 @@ LFCC_FN = torchaudio.transforms.LFCC(
     sample_rate=SAMPLING_RATE,
     n_lfcc=128,
     speckwargs={
-        "n_fft": 512,
+        "n_fft": 1024,
         "win_length": win_length,
         "hop_length": hop_length,
     },
@@ -32,7 +34,7 @@ LFCC_FN = torchaudio.transforms.LFCC(
 
 MEL_SCALE_FN = torchaudio.transforms.MelScale(
     n_mels=80,
-    n_stft=257,
+    n_stft=513,
     sample_rate=SAMPLING_RATE,
 ).to(device)
 

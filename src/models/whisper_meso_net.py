@@ -12,10 +12,10 @@ class WhisperMesoNet(MesoInception4):
 
         self.device = kwargs['device']
         checkpoint = torch.load(WHISPER_MODEL_WEIGHTS_PATH)
-        dims = ModelDimensions(**checkpoint["dims"].__dict__)
+        dims = ModelDimensions(**checkpoint["dims"])
         model = Whisper(dims)
         model = model.to(self.device)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
         self.whisper_model = model
         if freeze_encoder:
             for param in self.whisper_model.parameters():

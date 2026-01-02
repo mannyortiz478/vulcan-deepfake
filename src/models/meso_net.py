@@ -52,7 +52,7 @@ class MesoInception4(nn.Module):
         self.conv2 = nn.Conv2d(16, 16, 5, padding=2, bias=False)
         self.maxpooling2 = nn.MaxPool2d(kernel_size=(4, 4))
 
-        self.dropout = nn.Dropout2d(0.5)
+        self.dropout = nn.Dropout(0.5)
         self.fc1 = nn.Linear(self.fc1_dim, 16)
         self.fc2 = nn.Linear(16, num_classes)
 
