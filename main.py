@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 # Initialize your detector (ensure the path to weights is correct)
-detector = MesoNetDetector(model_path="models/whisper_meso_net.pth")
+detector = MesoNetDetector(model_path="models/mesonet_whisper_mfcc_finetuned.pth")
 
 @app.post("/detect")
 async def detect_audio(file: UploadFile = File(...)):
