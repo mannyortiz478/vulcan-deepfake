@@ -11,7 +11,16 @@ class MesoNetDetector:
         # Ensure 2 channels as required by the model weights
         self.model = WhisperMesoNet(input_channels=2, freeze_encoder=True, device=self.device) 
         
-        state_dict = torch.load(model_path, map_location=self.device)
+        try:
+            state_dict = torch.load(model_path, map_location=self.device)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Model file not found at {model_path}.\n"
+                "Set the MODEL_PATH environment variable or place the model file at this path."
+            ) from e
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model file at {model_path}: {e}") from e
+
         if isinstance(state_dict, dict) and 'state_dict' in state_dict:
             state_dict = state_dict['state_dict']
             

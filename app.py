@@ -62,6 +62,15 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 import streamlit as st
 from inference import MesoNetDetector
+from pathlib import Path
+
+# Try to import the Hugging Face helper. If it's unavailable we'll fall back.
+try:
+    from huggingface_hub import hf_hub_download  # type: ignore
+    HAS_HF_HUB = True
+except Exception:
+    hf_hub_download = None  # pragma: no cover - optional dependency
+    HAS_HF_HUB = False
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="AI Voice Guard", page_icon="🛡️")
 
@@ -69,11 +78,70 @@ st.set_page_config(page_title="AI Voice Guard", page_icon="🛡️")
 # This ensures the model only loads ONCE when the server starts
 @st.cache_resource
 def get_detector():
-    model_path = "mesonet_whisper_mfcc_finetuned.pth"
-    config_path = "configs/finetuning/whisper_frontend_mesonet.yaml"
-    return MesoNetDetector(model_path, config_path)
+    # Allow deployment to override model path via env var
+    model_path = os.environ.get("MODEL_PATH", "mesonet_whisper_mfcc_finetuned.pth")
+    config_path = os.environ.get("MODEL_CONFIG", "configs/finetuning/whisper_frontend_mesonet.yaml")
+
+    hf_repo_id = os.environ.get("HF_REPO_ID")
+    hf_token = os.environ.get("HF_TOKEN")
+    auto_download = os.environ.get("MODEL_AUTO_DOWNLOAD", "1").lower() not in ("0", "false")
+
+    # Try a few common candidate locations before attempting downloads
+    candidates = [model_path]
+    if not os.path.isabs(model_path):
+        candidates.extend([
+            os.path.join(os.getcwd(), model_path),
+            os.path.join("models", model_path),
+            os.path.join("/opt/render/project/src/models", model_path),
+        ])
+
+    found = None
+    for p in candidates:
+        if os.path.exists(p):
+            found = p
+            break
+
+    # If not found and HF info is provided, attempt to download from Hugging Face
+    if not found and hf_repo_id and auto_download:
+        if not HAS_HF_HUB:
+            st.warning(
+                "Hugging Face Hub not available in this environment. To enable automatic downloads, "
+                "install the `huggingface-hub` package (e.g. `pip install huggingface-hub`)."
+            )
+        else:
+            # Determine the filename we expect
+            filename = os.path.basename(model_path) if model_path else "mesonet_whisper_mfcc_finetuned.pth"
+            target_dir = Path("models")
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            with st.spinner(f"Downloading model {filename} from Hugging Face ({hf_repo_id})..."):
+                try:
+                    downloaded = hf_hub_download(
+                        repo_id=hf_repo_id,
+                        filename=filename,
+                        token=hf_token,
+                        local_dir=str(target_dir),
+                    )
+                    if downloaded and os.path.exists(downloaded):
+                        found = downloaded
+                        st.success(f"Model downloaded to {downloaded}")
+                except Exception as e:
+                    st.error(f"Failed to download model from Hugging Face: {e}")
+
+    if not found:
+        # Return None so the UI can display a friendly error message
+        return None
+
+    return MesoNetDetector(found, config_path)
 
 detector = get_detector()
+if detector is None:
+    st.error(
+        "Model file not found. The app tried to locate the model but couldn't find it. "
+        "Please set the MODEL_PATH environment variable to the model file path, or place `mesonet_whisper_mfcc_finetuned.pth` in the project root or `models/` folder. "
+        "See README.md for download and placement instructions."
+    )
+    st.stop()
 
 # --- UI DESIGN ---
 st.title("🛡️ AI Voice Deepfake Detector")
