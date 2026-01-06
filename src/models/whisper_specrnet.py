@@ -55,7 +55,7 @@ class WhisperMultiFrontSpecRNet(WhisperSpecRNet):
 
     def forward(self, x):
         # Frontend computation
-        frontend_x = self.frontend(x)
+        frontend_x = self.frontend(x, train=self.training)
         x = self.compute_whisper_features(x)
 
         x = torch.cat([x, frontend_x], 1)

@@ -1,0 +1,16 @@
+[Unit]
+Description=DeepFake Training Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/deepfake-whisper-features
+ExecStart=/bin/bash -lc 'source /home/ubuntu/deepfake-whisper-features/venv/bin/activate && python train_and_test.py --asv_path /path/to/asv --config configs/training/whisper_specrnet.yaml --device cuda --amp --batch_size 8 --epochs 100 --accum-steps 2 --use-tqdm'
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/deepfake/train.log
+StandardError=append:/var/log/deepfake/train.err
+
+[Install]
+WantedBy=multi-user.target

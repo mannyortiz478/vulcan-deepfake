@@ -9,9 +9,9 @@ import torch
 import yaml
 
 from src.datasets.detection_dataset import DetectionDataset
-from src.models import models
 from src.trainer import GDTrainer
 from src.commons import set_seed
+# note: import heavy model modules lazily inside train_nn to avoid import-time dependencies in tests
 
 
 def save_model(
@@ -24,16 +24,51 @@ def save_model(
     torch.save(model.state_dict(), f"{full_model_dir}/ckpt.pth")
 
 
+from src.utils.splits import stratified_split_df
+
+
 def get_datasets(
     datasets_paths: List[Union[Path, str]],
     amount_to_use: Tuple[Optional[int], Optional[int]],
-) -> Tuple[DetectionDataset, DetectionDataset]:
+    val_split: float = 0.0,
+    val_random_state: int = 42,
+    augment_params: Optional[dict] = None,
+) -> Tuple[DetectionDataset, Optional[DetectionDataset], DetectionDataset]:
+    # Optionally create an augmentation transform from config params
+    augment_transform = None
+    if augment_params:
+        from src.augmentations import get_augment_transform
+
+        augment_transform = get_augment_transform(**augment_params)
+
     data_train = DetectionDataset(
         asvspoof_path=datasets_paths[0],
         subset="train",
         reduced_number=amount_to_use[0],
         oversample=True,
+        transform=augment_transform,
     )
+
+    data_val = None
+    if val_split and val_split > 0.0:
+        try:
+            train_df, val_df = stratified_split_df(
+                data_train.samples, label_col="label", val_size=val_split, random_state=val_random_state
+            )
+            # Override samples for training set
+            data_train.samples = train_df.reset_index(drop=True)
+            # Build validation dataset and set its samples to the val split (no augmentation)
+            data_val = DetectionDataset(
+                asvspoof_path=datasets_paths[0],
+                subset="val",
+                reduced_number=None,
+                oversample=False,
+                augment=False,
+            )
+            data_val.samples = val_df.reset_index(drop=True)
+        except Exception:
+            data_val = None
+
     data_test = DetectionDataset(
         asvspoof_path=datasets_paths[0],
         subset="test",
@@ -41,7 +76,7 @@ def get_datasets(
         oversample=True,
     )
 
-    return data_train, data_test
+    return data_train, data_val, data_test
 
 
 def train_nn(
@@ -53,6 +88,9 @@ def train_nn(
     model_dir: Optional[Path] = None,
     amount_to_use: Tuple[Optional[int], Optional[int]] = (None, None),
     config_save_path: str = "configs",
+    use_amp: Optional[bool] = None,
+    accumulation_steps: int = 1,
+    use_tqdm: bool = False,
 ) -> Tuple[str, str]:
     logging.info("Loading data...")
     model_config = config["model"]
@@ -62,16 +100,31 @@ def train_nn(
     timestamp = time.time()
     checkpoint_path = ""
 
-    data_train, data_test = get_datasets(
+    # optionally create validation split if requested in config
+    val_split = config.get("data", {}).get("val_split", 0.0)
+    val_random_state = config.get("data", {}).get("val_random_state", 42)
+
+    # read augmentation params from config (optional)
+    augment_params = config.get("data", {}).get("augment", None)
+
+    data_train, data_val, data_test = get_datasets(
         datasets_paths=datasets_paths,
         amount_to_use=amount_to_use,
+        val_split=val_split,
+        val_random_state=val_random_state,
+        augment_params=augment_params,
     )
+
+    # Import models lazily to prevent heavy deps during tests
+    from src.models import models
 
     current_model = models.get_model(
         model_name=model_name,
         config=model_parameters,
         device=device,
     )
+    # pass use_amp via config if present
+    use_amp = config.get('training', {}).get('use_amp', None)
 
     # If provided weights, apply corresponding ones (from an appropriate fold)
     model_path = config["checkpoint"]["path"]
@@ -89,26 +142,36 @@ def train_nn(
 
     use_scheduler = "rawnet3" in model_name.lower()
 
+    # Prepare save destination and pass save path to trainer so best model is saved during training
+    save_name = f"model__{model_name}__{timestamp}"
+    save_dir = model_dir / save_name if model_dir is not None else None
+
+    # TensorBoard / logging directory
+    log_dir = str(save_dir / "logs") if save_dir is not None else None
+
     current_model = GDTrainer(
         device=device,
         batch_size=batch_size,
         epochs=epochs,
         optimizer_kwargs=optimizer_config,
         use_scheduler=use_scheduler,
+        use_amp=use_amp,
+        accumulation_steps=accumulation_steps,
+        use_tqdm=use_tqdm,
+        log_dir=log_dir,
     ).train(
         dataset=data_train,
         model=current_model,
+        val_dataset=data_val,
         test_dataset=data_test,
+        save_path=str(save_dir / "ckpt.pth") if save_dir is not None else None,
     )
 
+    # Final model save already handled during training; ensure checkpoint path resolved
     if model_dir is not None:
-        save_name = f"model__{model_name}__{timestamp}"
-        save_model(
-            model=current_model,
-            model_dir=model_dir,
-            name=save_name,
-        )
-        checkpoint_path = str(model_dir.resolve() / save_name / "ckpt.pth")
+        checkpoint_path = str(save_dir.resolve() / "ckpt.pth")
+
+    # (old behaviour replaced by saving during training)
 
     # Save config for testing
     if model_dir is not None:
@@ -138,10 +201,20 @@ def main(args):
     # fix all seeds
     set_seed(seed)
 
-    if not args.cpu and torch.cuda.is_available():
+    # Prefer explicit device if provided, otherwise honor --cpu flag and availability
+    if args.device is not None:
+        device = args.device
+    # Prefer explicit device if provided, otherwise honor --cpu flag and availability
+    if args.device is not None:
+        device = args.device
+    elif not args.cpu and torch.cuda.is_available():
         device = "cuda"
     else:
         device = "cpu"
+
+    # Respect explicit amp and accumulation request, otherwise let trainer auto-detect.
+    use_amp = args.amp if hasattr(args, 'amp') else None
+    accum_steps = args.accum_steps if hasattr(args, 'accum_steps') else 1
 
     model_dir = Path(args.ckpt)
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -227,6 +300,10 @@ def parse_args():
     )
 
     parser.add_argument("--cpu", "-c", help="Force using cpu?", action="store_true")
+    parser.add_argument("--device", help="Explicit device string (e.g. cpu, cuda, cuda:0)", type=str, default=None)
+    parser.add_argument("--amp", help="Enable mixed precision (automatic), default: auto when cuda available", action="store_true")
+    parser.add_argument("--accum-steps", help="Gradient accumulation steps (default: 1)", type=int, default=1)
+    parser.add_argument("--use-tqdm", help="Show tqdm progress bar during training", action="store_true")
 
     return parser.parse_args()
 

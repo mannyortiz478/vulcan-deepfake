@@ -223,7 +223,7 @@ class FrontendLCNN(LCNN):
         print(f"Using {frontend_name} frontend")
 
     def _compute_frontend(self, x):
-        frontend = self.frontend(x)
+        frontend = self.frontend(x, train=self.training)
         if frontend.ndim < 4:
             return frontend.unsqueeze(1)  # (bs, 1, n_lfcc, frames)
         return frontend # (bs, n, n_lfcc, frames)

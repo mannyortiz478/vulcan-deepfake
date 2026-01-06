@@ -55,7 +55,9 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
         fake_samples = []
         with open(Path(self.path) / self.protocol_file_name, "r") as file:
             for line in file:
-                label = line.strip().split(" ")[5]
+                tokens = line.strip().split()
+                # token positions may vary across versions; find label by token content
+                label = next((t for t in tokens if t in ("bonafide", "spoof")), None)
 
                 if label == "bonafide":
                     real_samples.append(line)
@@ -73,7 +75,11 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
         return pd.DataFrame(samples)
 
     def add_line_to_samples(self, samples, line):
-        _, sample_name, _, _, _, label, _, _ = line.strip().split(" ")
+        tokens = line.strip().split()
+        # most protocols place filename in position 1
+        sample_name = tokens[1]
+        # label present somewhere in tokens (we already filtered), find it
+        label = next((t for t in tokens if t in ("bonafide", "spoof")), "spoof")
         samples["sample_name"].append(sample_name)
         samples["label"].append(label)
         samples["attack_type"].append(label)

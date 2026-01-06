@@ -127,7 +127,7 @@ class FrontendMesoInception4(MesoInception4):
         print(f"Using {frontend_name} frontend")
 
     def forward(self, x):
-        x = self.frontend(x)
+        x = self.frontend(x, train=self.training)
         x = self._compute_embedding(x)
         return x
 

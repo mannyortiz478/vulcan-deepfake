@@ -7,3 +7,6 @@ librosa
 numpy
 plotly
 matplotlib
+scikit-learn
+transformers
+tqdm

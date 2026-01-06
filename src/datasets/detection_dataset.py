@@ -28,6 +28,7 @@ class DetectionDataset(SimpleAudioFakeDataset):
         return_label: bool = True,
         reduced_number: Optional[int] = None,
         return_meta: bool = False,
+        augment: Optional[bool] = None,
     ):
         super().__init__(
             subset=subset,
@@ -55,6 +56,19 @@ class DetectionDataset(SimpleAudioFakeDataset):
                 min(len(self.samples), reduced_number),
                 random_state=42,
             )
+
+        # If augment flag is not explicitly provided, enable augmentation for training subset
+        if augment is None:
+            augment = True if self.subset == "train" else False
+
+        if transform is None and augment:
+            # Lazily import to avoid extra dependency until needed
+            from src.augmentations import get_augment_transform
+
+            self.transform = get_augment_transform()
+        else:
+            # keep provided transform (or None)
+            self.transform = transform
 
     def _init_datasets(
         self,
@@ -88,6 +102,10 @@ class DetectionDataset(SimpleAudioFakeDataset):
 
     def oversample_dataset(self):
         samples = self.samples.groupby(by=["label"])
+        # If either class missing, skip oversampling
+        if "bonafide" not in samples.groups or "spoof" not in samples.groups:
+            return
+
         bona_length = len(samples.groups["bonafide"])
         spoof_length = len(samples.groups["spoof"])
 

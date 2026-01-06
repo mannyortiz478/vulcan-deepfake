@@ -4,27 +4,29 @@ The following repository contains code for our paper called "Improved DeepFake D
 
 The paper is available [here](https://www.isca-speech.org/archive/interspeech_2023/kawa23b_interspeech.html).
 
-
 ## Before you start
 
 ### Whisper
+
 To download Whisper encoder used in training run `download_whisper.py`.
 
 ### Datasets
 
 Download appropriate datasets:
-* [ASVspoof2021 DF subset](https://zenodo.org/record/4835108) (**Please note:** we use this [keys&metadata file](https://www.asvspoof.org/resources/DF-keys-stage-1.tar.gz), directory structure is explained [here](https://github.com/piotrkawa/deepfake-whisper-features/issues/7#issuecomment-1830109945)),
-* [In-The-Wild dataset](https://deepfake-demo.aisec.fraunhofer.de/in_the_wild).
 
-
+- [ASVspoof2021 DF subset](https://zenodo.org/record/4835108) (**Please note:** we use this [keys&metadata file](https://www.asvspoof.org/resources/DF-keys-stage-1.tar.gz), directory structure is explained [here](https://github.com/piotrkawa/deepfake-whisper-features/issues/7#issuecomment-1830109945)),
+- [In-The-Wild dataset](https://deepfake-demo.aisec.fraunhofer.de/in_the_wild).
 
 ### Dependencies
+
 Install required dependencies using (we assume you're using conda and the target env is active):
+
 ```bash
 bash install.sh
 ```
 
 List of requirements:
+
 ```
 python=3.8
 pytorch==1.11.0
@@ -37,16 +39,17 @@ openai whisper (git+https://github.com/openai/whisper.git@7858aa9c08d98f75575035
 ### Supported models
 
 The following list concerns models and its names to select it supported by this repository:
-* SpecRNet - `specrnet`,
-* (Whisper) SpecRNet - `whisper_specrnet`,
-* (Whisper + LFCC/MFCC) SpecRNet - `whisper_frontend_specrnet`,
-* LCNN - `lcnn`,
-* (Whisper) LCNN - `whisper_lcnn`,
-* (Whisper + LFCC/MFCC) LCNN -`whisper_frontend_lcnn`,
-* MesoNet - `mesonet`,
-* (Whisper) MesoNet - `whisper_mesonet`,
-* (Whisper + LFCC/MFCC) MesoNet - `whisper_frontend_mesonet`,
-* RawNet3 - `rawnet3`.
+
+- SpecRNet - `specrnet`,
+- (Whisper) SpecRNet - `whisper_specrnet`,
+- (Whisper + LFCC/MFCC) SpecRNet - `whisper_frontend_specrnet`,
+- LCNN - `lcnn`,
+- (Whisper) LCNN - `whisper_lcnn`,
+- (Whisper + LFCC/MFCC) LCNN -`whisper_frontend_lcnn`,
+- MesoNet - `mesonet`,
+- (Whisper) MesoNet - `whisper_mesonet`,
+- (Whisper + LFCC/MFCC) MesoNet - `whisper_frontend_mesonet`,
+- RawNet3 - `rawnet3`.
 
 To select appropriate front-end please specify it in the config file.
 
@@ -58,11 +61,12 @@ All models reported in paper are available [here](https://drive.google.com/drive
 
 Both training and evaluation scripts are configured with the use of CLI and `.yaml` configuration files.
 e.g.:
+
 ```yaml
 data:
   seed: 42
 
-checkpoint: 
+checkpoint:
   path: "trained_models/lcnn/ckpt.pth",
 
 model:
@@ -77,14 +81,16 @@ model:
 
 Other example configs are available under `configs/training/`.
 
-## Full train and test pipeline 
+**Validation split & logging**: you can request a stratified validation split by adding `data.val_split: 0.1` to your config (keeps label distribution). Training will automatically create a `logs/` directory next to saved checkpoints and produce `metrics.csv`; if TensorBoard is installed it will also write a TensorBoard run to that folder.
+
+## Full train and test pipeline
 
 To perform full pipeline of training and testing please use `train_and_test.py` script.
 
 ```
 usage: train_and_test.py [-h] [--asv_path ASV_PATH] [--in_the_wild_path IN_THE_WILD_PATH] [--config CONFIG] [--train_amount TRAIN_AMOUNT] [--test_amount TEST_AMOUNT] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--ckpt CKPT] [--cpu]
 
-Arguments: 
+Arguments:
     --asv_path          Path to the ASVSpoof2021 DF root dir
     --in_the_wild_path  Path to the In-The-Wild root dir
     --config            Path to the config file
@@ -98,38 +104,44 @@ Arguments:
 ```
 
 e.g.:
+
 ```bash
 python train_and_test.py --asv_path ../datasets/deep_fakes/ASVspoof2021/DF --in_the_wild_path ../datasets/release_in_the_wild --config configs/training/whisper_specrnet.yaml --batch_size 8 --epochs 10 --train_amount 100000 --valid_amount 25000
 ```
-
 
 ## Finetune and test pipeline
 
 To perform finetuning as presented in paper please use `train_and_test.py` script.
 
 e.g.:
+
 ```
 python train_and_test.py --asv_path ../datasets/deep_fakes/ASVspoof2021/DF --in_the_wild_path ../datasets/release_in_the_wild --config configs/finetuning/whisper_specrnet.yaml --batch_size 8 --epochs 5  --train_amount 100000 --valid_amount 25000
 ```
-Please remember about decreasing the learning rate!
 
+Please remember about decreasing the learning rate!
 
 ## Other scripts
 
 To use separate scripts for training and evaluation please refer to respectively `train_models.py` and `evaluate_models.py`.
 
-
 ## Acknowledgments
 
+**See `docs/USAGE.md` for an example on using pretrained encoders and augmentations.**
+
+**CI:** A GitHub Actions workflow (`.github/workflows/ci.yml`) is included to run the test-suite on pushes and pull-requests. Install dev dependencies from `requirements-dev.txt` to run tests locally (e.g., `pip install -r requirements-dev.txt`).
+
+**GCP VM / GPU tips:** See `docs/VM_SETUP.md` for step-by-step commands to prepare a Google Cloud VM with GPU, install CUDA-aware PyTorch, and run a smoke training command (including recommended `--amp` and `--accum-steps` usage).
+
 We base our codebase on [Attack Agnostic Dataset repo](https://github.com/piotrkawa/attack-agnostic-dataset).
-Apart from the dependencies mentioned in Attack Agnostic Dataset repository we also include: 
-* [RawNet3 implementation](https://github.com/Jungjee/RawNet).
+Apart from the dependencies mentioned in Attack Agnostic Dataset repository we also include:
 
-
+- [RawNet3 implementation](https://github.com/Jungjee/RawNet).
 
 ## Citation
 
 If you use this code in your research please use the following citation:
+
 ```
 @inproceedings{kawa23b_interspeech,
   author={Piotr Kawa and Marcin Plata and Michał Czuba and Piotr Szymański and Piotr Syga},

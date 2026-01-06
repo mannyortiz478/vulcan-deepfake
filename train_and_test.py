@@ -99,6 +99,10 @@ def parse_args():
     )
 
     parser.add_argument("--cpu", "-c", help="Force using cpu?", action="store_true")
+    parser.add_argument("--device", help="Explicit device string (e.g. cpu, cuda, cuda:0)", type=str, default=None)
+    parser.add_argument("--amp", help="Enable mixed precision (automatic), default: auto when cuda available", action="store_true")
+    parser.add_argument("--accum-steps", help="Gradient accumulation steps (default: 1)", type=int, default=1)
+    parser.add_argument("--use-tqdm", help="Show tqdm progress bar during training", action="store_true")
 
     return parser.parse_args()
 
@@ -114,7 +118,10 @@ if __name__ == "__main__":
     # fix all seeds
     set_seed(seed)
 
-    if not args.cpu and torch.cuda.is_available():
+    # Prefer explicit device if provided, otherwise honor --cpu flag and availability
+    if args.device is not None:
+        device = args.device
+    elif not args.cpu and torch.cuda.is_available():
         device = "cuda"
     else:
         device = "cpu"
@@ -132,6 +139,9 @@ if __name__ == "__main__":
         epochs=args.epochs,
         model_dir=model_dir,
         config=config,
+        use_amp=args.amp if hasattr(args, 'amp') else None,
+        accumulation_steps=args.accum_steps if hasattr(args, 'accum_steps') else 1,
+        use_tqdm=args.use_tqdm if hasattr(args, 'use_tqdm') else False,
     )
 
     with open(evaluation_config_path, "r") as f:

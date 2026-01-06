@@ -8,7 +8,11 @@ import pandas as pd
 import torch
 import torchaudio
 from torch.utils.data import Dataset
-from torch.utils.data.dataset import T_co
+# `T_co` isn't available on some torch versions; provide a fallback for typing compatibility
+try:
+    from torch.utils.data.dataset import T_co
+except Exception:
+    from typing import Any as T_co
 
 
 LOGGER = logging.getLogger(__name__)
@@ -86,6 +90,14 @@ class SimpleAudioFakeDataset(Dataset):
         real_sec_length = len(waveform[0]) / sample_rate
 
         waveform, sample_rate = apply_preprocessing(waveform, sample_rate)
+
+        # Apply optional waveform-level transform (augmentations) if provided
+        if self.transform is not None:
+            try:
+                waveform = self.transform(waveform, sample_rate)
+            except TypeError:
+                # Backwards compatibility: some transforms may accept single arg only
+                waveform = self.transform(waveform)
 
         return_data = [waveform, sample_rate]
         if self.return_label:
