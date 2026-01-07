@@ -5,14 +5,24 @@ import random
 
 import numpy as np
 import pandas as pd
-import torch
-import torchaudio
-from torch.utils.data import Dataset
-# `T_co` isn't available on some torch versions; provide a fallback for typing compatibility
+
+# Avoid importing heavy torch/torchaudio at test import-time if not installed. Provide
+# lightweight fallbacks to allow unit tests that don't exercise audio IO to run.
 try:
-    from torch.utils.data.dataset import T_co
+    import torch
+    import torchaudio
+    from torch.utils.data import Dataset
+    try:
+        from torch.utils.data.dataset import T_co
+    except Exception:
+        from typing import Any as T_co
 except Exception:
+    torch = None
+    torchaudio = None
+    Dataset = object
     from typing import Any as T_co
+    import logging as _logging
+    _logging.getLogger(__name__).warning("torch or torchaudio not available; certain dataset operations will be disabled in tests")
 
 
 LOGGER = logging.getLogger(__name__)
