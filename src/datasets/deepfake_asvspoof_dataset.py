@@ -18,13 +18,15 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
     subset_dir_prefix = "ASVspoof2021_DF_eval"
     subset_parts = ("part00", "part01", "part02", "part03")
 
-    def __init__(self, path, subset="train", transform=None):
+    def __init__(self, path, subset="train", transform=None, load_protocol=True, allow_approx_match=False):
         super().__init__(subset, transform)
         # normalize and expand user-provided path (handles ~)
         self.path = Path(path).expanduser()
 
         self.partition_ratio = DF_ASVSPOOF_SPLIT["partition_ratio"]
         self.seed = DF_ASVSPOOF_SPLIT["seed"]
+
+        self.allow_approx_match = allow_approx_match
 
         self.flac_paths = self.get_file_references()
         if not self.flac_paths:
@@ -33,11 +35,16 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
                 "If you used '~' ensure it was expanded or provide an absolute path." 
             )
 
-        self.samples = self.read_protocol()
+        # Optionally defer reading protocol so callers can diagnose without failing
+        self.samples = pd.DataFrame()
+        if load_protocol:
+            self.samples = self.read_protocol()
 
         self.transform = transform
-        LOGGER.info(f"Spoof: {len(self.samples[self.samples['label'] == 'spoof'])}")
-        LOGGER.info(f"Original: {len(self.samples[self.samples['label'] == 'bonafide'])}")
+        # only log splits info if samples DF has been populated
+        if isinstance(self.samples, pd.DataFrame) and 'label' in self.samples.columns:
+            LOGGER.info(f"Spoof: {len(self.samples[self.samples['label'] == 'spoof'])}")
+            LOGGER.info(f"Original: {len(self.samples[self.samples['label'] == 'bonafide'])}")
 
     def get_file_references(self):
         flac_paths = {}
@@ -86,7 +93,7 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
             )
         return flac_paths
 
-    def read_protocol(self):
+    def read_protocol(self, split: bool = True):
         samples = {
             "sample_name": [],
             "label": [],
@@ -107,15 +114,74 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
                 elif label == "spoof":
                     fake_samples.append(line)
 
-        fake_samples = self.split_samples(fake_samples)
-        for line in fake_samples:
-            samples = self.add_line_to_samples(samples, line)
+        if split:
+            fake_samples = self.split_samples(fake_samples)
+            for line in fake_samples:
+                samples = self.add_line_to_samples(samples, line)
 
-        real_samples = self.split_samples(real_samples)
-        for line in real_samples:
-            samples = self.add_line_to_samples(samples, line)
+            real_samples = self.split_samples(real_samples)
+            for line in real_samples:
+                samples = self.add_line_to_samples(samples, line)
+        else:
+            # do not split - return all protocol entries as-is (useful for diagnostics/tests)
+            for line in fake_samples + real_samples:
+                samples = self.add_line_to_samples(samples, line)
 
         return pd.DataFrame(samples)
+
+    def get_protocol_sample_names(self):
+        """Return normalized sample names (stem) from the protocol file without resolving paths."""
+        names = []
+        proto_path = Path(self.path) / self.protocol_file_name
+        with open(proto_path, "r") as f:
+            for line in f:
+                tokens = line.strip().split()
+                if len(tokens) < 2:
+                    continue
+                name = tokens[1].strip()
+                if name.endswith('.flac'):
+                    name = name[:-5]
+                names.append(name)
+        return names
+
+    def diagnose_protocol(self, max_suggestions: int = 5, cutoff: float = 0.6):
+        """Diagnose protocol mismatches.
+
+        Returns a dict with:
+          - missing: list of protocol names not found
+          - suggestions: mapping sample -> list of close matches
+          - available_preview: first 20 available stems
+        """
+        import difflib
+
+        proto = self.get_protocol_sample_names()
+        keys = list(self.flac_paths.keys())
+        missing = []
+        suggestions = {}
+
+        for name in proto:
+            if name in self.flac_paths:
+                continue
+            # try basename match
+            base = name.split('/')[-1]
+            if base in self.flac_paths:
+                continue
+            # try substring match
+            if any(name in k or k in name for k in keys):
+                continue
+
+            # otherwise consider missing
+            missing.append(name)
+            close = difflib.get_close_matches(name, keys, n=max_suggestions, cutoff=cutoff)
+            if close:
+                suggestions[name] = close
+
+        return {
+            "missing": missing,
+            "suggestions": suggestions,
+            "available_preview": keys[:20],
+            "available_count": len(keys),
+        }
 
     def add_line_to_samples(self, samples, line):
         tokens = line.strip().split()
@@ -152,10 +218,28 @@ class DeepFakeASVSpoofDataset(SimpleAudioFakeDataset):
                 )
 
         if sample_path is None:
-            # helpful error listing a few available stems
+            # try difflib close matches to offer suggestions
+            import difflib
+
+            keys = list(self.flac_paths.keys())
+            close = difflib.get_close_matches(sample_name, keys, n=5, cutoff=0.6)
+            if close and self.allow_approx_match:
+                chosen = close[0]
+                sample_path = self.flac_paths[chosen]
+                LOGGER.warning(
+                    f"Protocol sample_name '{sample_name}' not found as exact stem; using approximate match '{chosen}'"
+                )
+
+        if sample_path is None:
+            # helpful error listing a few available stems and close matches (if any)
             available = list(self.flac_paths.keys())[:10]
+            import difflib
+
+            keys = list(self.flac_paths.keys())
+            close = difflib.get_close_matches(sample_name, keys, n=5, cutoff=0.5)
+            close_msg = f" Close matches: {close}" if close else ""
             raise KeyError(
-                f"Sample '{sample_name}' not found in flac paths. Available stems (first 10): {available}"
+                f"Sample '{sample_name}' not found in flac paths. Available stems (first 10): {available}.{close_msg}"
             )
 
         assert sample_path.exists(), f"Referenced audio file does not exist: {sample_path}"

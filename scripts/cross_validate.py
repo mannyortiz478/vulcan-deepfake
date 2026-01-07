@@ -46,6 +46,8 @@ def parse_args():
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--use_fake_audio", action="store_true", help="Do not load audio files; use random tensors (useful for smoke tests)")
     parser.add_argument("--dry_run", action="store_true", help="Do not train models; only prepare folds and write summary (useful for smoke tests)")
+    parser.add_argument("--diagnose_protocol", action="store_true", help="Diagnose protocol vs available flac files and exit with a report")
+    parser.add_argument("--auto_match", action="store_true", help="Automatically resolve protocol sample names to best approximate flac match when exact names are missing")
     return parser.parse_args()
 
 
@@ -78,7 +80,24 @@ def main():
     cfg = read_config(args.config)
 
     # read full training set as DF using dataset reader
-    full_ds = DeepFakeASVSpoofDataset(args.asv_path, subset="train")
+    # Allow diagnosing protocol mismatches without raising by deferring protocol load
+    full_ds = DeepFakeASVSpoofDataset(args.asv_path, subset="train", load_protocol=not args.diagnose_protocol, allow_approx_match=args.auto_match)
+
+    if args.diagnose_protocol:
+        report = full_ds.diagnose_protocol()
+        LOGGER.info(f"Found {report['available_count']} flac files indexed")
+        LOGGER.info(f"Protocol sample names missing: {len(report['missing'])}")
+        if report['missing']:
+            sampleu = report['missing'][:20]
+            LOGGER.info(f"Sample missing (first 20): {sampleu}")
+        if report['suggestions']:
+            # print a few suggestion examples
+            for k, v in list(report['suggestions'].items())[:10]:
+                LOGGER.info(f"Suggestion for {k}: {v}")
+        LOGGER.info(f"Available stems preview: {report['available_preview']}")
+        LOGGER.info("Diagnosis complete. Use --auto_match to allow best-effort resolution of names during dataset loading.")
+        return
+
     df = full_ds.samples
 
     folds = stratified_kfold_df(df, label_col="label", n_splits=args.folds, random_state=cfg.get("data", {}).get("seed", 42))

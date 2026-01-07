@@ -53,8 +53,54 @@ def test_deepfake_parser_fallback_matching(tmp_path):
     (partdir / 'chunk_DF_E_3772106.flac').write_bytes(b'RIFF')
 
     ds = DeepFakeASVSpoofDataset(str(base), subset='train')
-    df = ds.samples
+    # read without splitting to validate mapping behavior on the full protocol
+    df = ds.read_protocol(split=False)
     # Should find the file despite prefix mismatch
+    assert len(df) == 1
+    assert Path(df.iloc[0]['path']).exists()
+
+
+def test_diagnose_protocol_reports_missing_and_suggestions(tmp_path):
+    base = Path(tmp_path)
+    keys_dir = base / 'keys' / 'CM'
+    keys_dir.mkdir(parents=True)
+
+    # Protocol contains one exact, one missing, one similar
+    lines = [
+        "spk0 DF_E_0000001 dummy sys0 bonafide train pcm16 16",
+        "spk1 DF_E_9999999 dummy sys1 bonafide train pcm16 16",
+        "spk2 DF_E_3772106 dummy sys2 bonafide train pcm16 16",
+    ]
+    (keys_dir / 'trial_metadata.txt').write_text('\n'.join(lines))
+
+    partdir = base / 'ASVspoof2021_DF_eval' / 'flac'
+    partdir.mkdir(parents=True)
+    (partdir / 'DF_E_0000001.flac').write_bytes(b'RIFF')
+    (partdir / 'DF_E_3772106_variant.flac').write_bytes(b'RIFF')
+
+    ds = DeepFakeASVSpoofDataset(str(base), subset='train', load_protocol=False)
+    report = ds.diagnose_protocol()
+
+    # missing should include the truly missing id
+    assert 'DF_E_9999999' in report['missing']
+    # suggestions should include a suggestion for the similar one
+    assert 'DF_E_3772106' in report['suggestions']
+
+
+def test_auto_match_allows_approximate_resolution(tmp_path):
+    base = Path(tmp_path)
+    keys_dir = base / 'keys' / 'CM'
+    keys_dir.mkdir(parents=True)
+
+    lines = ["spk0 DF_E_3772106 dummy sys0 bonafide train pcm16 16"]
+    (keys_dir / 'trial_metadata.txt').write_text('\n'.join(lines))
+
+    partdir = base / 'ASVspoof2021_DF_eval_part00' / 'ASVspoof2021_DF_eval' / 'flac'
+    partdir.mkdir(parents=True)
+    (partdir / 'chunk_DF_E_3772106.flac').write_bytes(b'RIFF')
+
+    ds = DeepFakeASVSpoofDataset(str(base), subset='train', allow_approx_match=True)
+    df = ds.read_protocol(split=False)
     assert len(df) == 1
     assert Path(df.iloc[0]['path']).exists()
 
